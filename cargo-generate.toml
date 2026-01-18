@@ -1,0 +1,27 @@
+[template]
+cargo_generate_version = ">=0.23"
+ignore = ["target", ".git"]
+
+exclude = [
+    "{{#unless include_agents}}AGENTS.md{{/unless}}",
+]
+
+[placeholders.port]
+type = "string"
+prompt = "HTTP port"
+default = "3000"
+
+[placeholders.service_name]
+type = "string"
+prompt = "Service display name"
+default = "Axum Service"
+
+[placeholders.include_agents]
+type = "bool"
+prompt = "Include AGENTS.md?"
+default = true
+
+[placeholders.project_goal]
+type = "string"
+prompt = "Project goal (AGENTS.md)"
+default = "Build an Axum HTTP service (Rust)."
