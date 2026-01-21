@@ -76,6 +76,12 @@ The template reads configuration from environment variables in `src/config.rs`.
 | `HTTP_PORT`  | No       | `3000`        | Must be a valid `u16` port. |
 | `APP_ENV`    | No       | `development` | `development` (default) or `production` / `prod`. If set to production, JSON logging is forced. |
 | `LOG_FORMAT` | No       | `pretty`      | `pretty` (default) or `json`. If `APP_ENV=production`, JSON logging is forced regardless of this value. |
+| `APP_CORS_ORIGINS` | No | `""` (disabled) | `""` disables CORS, `*` allows any origin, or a comma-separated allowlist of origins. |
+| `APP_RATELIMIT_RPS` | No | (disabled) | Requests per second to allow. If not set, rate limiting is disabled. |
+| `APP_RATELIMIT_BURST` | No | `20` | Burst size when rate limiting is enabled. |
+| `APP_RATELIMIT_TRUST_PROXY` | No | `false` | If `true`, uses proxy headers (e.g. `X-Forwarded-For`) for client IPs. |
+
+See `.env.example` for a starter config.
 
 Run locally (pretty logs by default):
 
@@ -93,6 +99,43 @@ Run in “production” mode (forces JSON logs):
 
 ```bash
 APP_ENV=production HTTP_HOST=0.0.0.0 HTTP_PORT=8080 cargo run
+```
+
+Enable CORS and rate limiting:
+
+```bash
+APP_CORS_ORIGINS="https://example.com,https://admin.example.com" \
+APP_RATELIMIT_RPS=50 \
+APP_RATELIMIT_BURST=100 \
+APP_RATELIMIT_TRUST_PROXY=true \
+cargo run
+```
+
+Security note: only set `APP_RATELIMIT_TRUST_PROXY=true` when running behind a trusted
+reverse proxy that you control; otherwise clients can spoof `X-Forwarded-For` to bypass limits.
+
+Per-route/per-router rate limiting is supported using the same `GovernorLayer` middleware.
+Attach it with `.layer(...)` for a whole router or `.route_layer(...)` for a single route.
+
+Example: custom rate limit on a single route:
+
+```rust
+use std::sync::Arc;
+use axum::{Router, routing::get};
+use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder};
+
+let health = Router::new().route(
+    "/health",
+    get(crate::handlers::ops::health).route_layer(
+        GovernorLayer::new(Arc::new(
+    GovernorConfigBuilder::default()
+        .per_second(5)
+        .burst_size(10)
+        .finish()
+        .expect("governor config must be valid"),
+        )),
+    ),
+);
 ```
 
 ---
@@ -258,9 +301,19 @@ Enabled features:
 - `request-id`
 - `sensitive-headers`
 - `util`
+- `cors`
 
 Feature reference: https://docs.rs/crate/tower-http/latest/features  
 Request ID docs: https://docs.rs/tower-http/latest/tower_http/request_id/
+
+### `tower-governor`
+
+Enabled features:
+
+- `axum`
+- `tracing`
+
+Feature reference: https://docs.rs/crate/tower-governor/latest/features
 
 ### `tracing-subscriber`
 

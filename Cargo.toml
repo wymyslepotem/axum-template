@@ -8,7 +8,8 @@ axum = "0.8.8"
 tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread", "signal"] }
 
 tower = { version = "0.5.3", features = ["util"] }
-tower-http = { version = "0.6.8", features = ["trace", "request-id", "util", "sensitive-headers"] }
+tower-http = { version = "0.6.8", features = ["trace", "request-id", "util", "sensitive-headers", "cors"] }
+tower_governor = { version = "0.8", default-features = false, features = ["axum", "tracing"] }
 
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter", "json"] }

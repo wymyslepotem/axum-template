@@ -2,17 +2,25 @@ use axum::{
     Router,
     http::header::{AUTHORIZATION, COOKIE, SET_COOKIE},
 };
+use std::sync::Arc;
 use tower::ServiceBuilder;
+use tower_governor::{
+    GovernorLayer,
+    governor::GovernorConfigBuilder,
+    key_extractor::{PeerIpKeyExtractor, SmartIpKeyExtractor},
+};
 use tower_http::{
     LatencyUnit, ServiceBuilderExt,
+    cors::{AllowOrigin, Any, CorsLayer},
     request_id::MakeRequestUuid,
     sensitive_headers::SetSensitiveHeadersLayer,
     trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer},
 };
 
+use crate::config::{CorsConfig, Settings};
 use crate::state::AppState;
 
-pub fn build_router() -> Router<AppState> {
+pub fn build_router(settings: &Settings) -> Router<AppState> {
     let routes = crate::routes::router();
 
     let middleware = ServiceBuilder::new()
@@ -29,7 +37,47 @@ pub fn build_router() -> Router<AppState> {
         )
         .propagate_x_request_id();
 
-    Router::<AppState>::new().merge(routes).layer(middleware)
+    let app = Router::<AppState>::new().merge(routes).layer(middleware);
+    let app = apply_cors(app, settings);
+    apply_ratelimit(app, settings)
+}
+
+fn apply_cors(app: Router<AppState>, settings: &Settings) -> Router<AppState> {
+    match &settings.cors {
+        CorsConfig::Disabled => app,
+        CorsConfig::Any => app.layer(CorsLayer::new().allow_origin(Any)),
+        CorsConfig::AllowList(origins) => {
+            app.layer(CorsLayer::new().allow_origin(AllowOrigin::list(origins.clone())))
+        }
+    }
+}
+
+fn apply_ratelimit(app: Router<AppState>, settings: &Settings) -> Router<AppState> {
+    let Some(ratelimit) = settings.ratelimit.as_ref() else {
+        return app;
+    };
+
+    if ratelimit.trust_proxy {
+        let governor_config = Arc::new(
+            GovernorConfigBuilder::default()
+                .per_second(u64::from(ratelimit.rps.get()))
+                .burst_size(ratelimit.burst.get())
+                .key_extractor(SmartIpKeyExtractor)
+                .finish()
+                .expect("governor config must be valid"),
+        );
+        app.layer(GovernorLayer::new(governor_config))
+    } else {
+        let governor_config = Arc::new(
+            GovernorConfigBuilder::default()
+                .per_second(u64::from(ratelimit.rps.get()))
+                .burst_size(ratelimit.burst.get())
+                .key_extractor(PeerIpKeyExtractor)
+                .finish()
+                .expect("governor config must be valid"),
+        );
+        app.layer(GovernorLayer::new(governor_config))
+    }
 }
 
 #[cfg(test)]
@@ -45,7 +93,7 @@ mod tests {
     use serde_json::Value;
     use tower::util::ServiceExt;
 
-    use crate::config::{AppEnv, LogFormat, Settings};
+    use crate::config::{AppEnv, CorsConfig, LogFormat, Settings};
     use crate::state::AppState;
 
     fn test_settings() -> Settings {
@@ -54,12 +102,14 @@ mod tests {
             http_port: 0,
             app_env: AppEnv::Development,
             log_format: LogFormat::Pretty,
+            cors: CorsConfig::Disabled,
+            ratelimit: None,
         }
     }
 
     fn test_app() -> axum::Router<()> {
         let state = AppState::new(test_settings());
-        build_router().with_state(state)
+        build_router(state.settings.as_ref()).with_state(state)
     }
 
     async fn body_to_bytes(res: Response) -> Bytes {
